@@ -14,7 +14,7 @@ import {
   Param,
   Post,
   Put,
-  Request,
+  Request, UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { NotInDBError } from '../../../errors/errors';
@@ -32,6 +32,7 @@ import { NoteDto } from '../../../notes/note.dto';
 import { NoteMetadataDto } from '../../../notes/note-metadata.dto';
 import { RevisionMetadataDto } from '../../../revisions/revision-metadata.dto';
 import { RevisionDto } from '../../../revisions/revision.dto';
+import { PermissionsService } from '../../../permissions/permissions.service';
 
 @ApiSecurity('token')
 @Controller('notes')
@@ -40,6 +41,7 @@ export class NotesController {
     private readonly logger: ConsoleLoggerService,
     private noteService: NotesService,
     private revisionsService: RevisionsService,
+    private permissionsService: PermissionsService,
   ) {
     this.logger.setContext(NotesController.name);
   }
@@ -51,10 +53,29 @@ export class NotesController {
     @MarkdownBody() text: string,
   ): Promise<NoteDto> {
     // ToDo: provide user for createNoteDto
+    if(!this.permissionsService.mayCreate(req.user)){
+      throw new UnauthorizedException("Creation denied!");
+    }
     this.logger.debug('Got raw markdown:\n' + text);
-    return this.noteService.toNoteDto(
-      await this.noteService.createNote(text, undefined, req.user),
-    );
+    return this.noteService.createNoteDto(text, "", req.user);
+  }
+
+  @UseGuards(TokenAuthGuard)
+  @Get(':noteIdOrAlias')
+  async getNote(@Request() req, @Param('noteIdOrAlias') noteIdOrAlias: string) {
+    const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
+    if(!this.permissionsService.mayRead(req.user, note)){
+      throw new UnauthorizedException("Read denied!");
+    }
+    // ToDo: check if user is allowed to view this note
+    try {
+      return await this.noteService.getNoteDtoByIdOrAlias(noteIdOrAlias);
+    } catch (e) {
+      if (e instanceof NotInDBError) {
+        throw new NotFoundException(e.message);
+      }
+      throw e;
+    }
   }
 
   @UseGuards(TokenAuthGuard)
@@ -64,7 +85,9 @@ export class NotesController {
     @Param('noteAlias') noteAlias: string,
     @MarkdownBody() text: string,
   ): Promise<NoteDto> {
-    // ToDo: check if user is allowed to view this note
+    if(!this.permissionsService.mayCreate(req.user)){
+      throw new UnauthorizedException("Create denied!");
+    }
     this.logger.debug('Got raw markdown:\n' + text);
     return this.noteService.toNoteDto(
       await this.noteService.createNote(text, noteAlias, req.user),
@@ -96,7 +119,10 @@ export class NotesController {
     @Request() req,
     @Param('noteIdOrAlias') noteIdOrAlias: string,
   ): Promise<void> {
-    // ToDo: check if user is allowed to delete this note
+    const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
+    if(!this.permissionsService.isOwner(req.user, note)){
+      throw new UnauthorizedException("Delete denied!");
+    }
     this.logger.debug('Deleting note: ' + noteIdOrAlias);
     try {
       await this.noteService.deleteNoteByIdOrAlias(noteIdOrAlias);
@@ -118,6 +144,10 @@ export class NotesController {
     @MarkdownBody() text: string,
   ): Promise<NoteDto> {
     // ToDo: check if user is allowed to change this note
+    const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
+    if(!this.permissionsService.mayWrite(req.user, note)){
+      throw new UnauthorizedException("Update denied!");
+    }
     this.logger.debug('Got raw markdown:\n' + text);
     try {
       return this.noteService.toNoteDto(
@@ -138,7 +168,10 @@ export class NotesController {
     @Request() req,
     @Param('noteIdOrAlias') noteIdOrAlias: string,
   ): Promise<string> {
-    // ToDo: check if user is allowed to view this notes content
+    const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
+    if(!this.permissionsService.mayRead(req.user, note)){
+      throw new UnauthorizedException("Read denied!");
+    }
     try {
       return await this.noteService.getNoteContent(noteIdOrAlias);
     } catch (e) {
@@ -155,7 +188,10 @@ export class NotesController {
     @Request() req,
     @Param('noteIdOrAlias') noteIdOrAlias: string,
   ): Promise<NoteMetadataDto> {
-    // ToDo: check if user is allowed to view this notes metadata
+    const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
+    if(!this.permissionsService.mayRead(req.user, note)){
+      throw new UnauthorizedException("Read denied!");
+    }
     try {
       return this.noteService.toNoteMetadataDto(
         await this.noteService.getNoteByIdOrAlias(noteIdOrAlias),
@@ -176,6 +212,10 @@ export class NotesController {
     @Body() updateDto: NotePermissionsUpdateDto,
   ): Promise<NotePermissionsDto> {
     // ToDo: check if user is allowed to view this notes permissions
+    const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
+    if(!this.permissionsService.isOwner(req.user, note)){
+      throw new UnauthorizedException("Update denied!");
+    }
     try {
       return this.noteService.toNotePermissionsDto(
         await this.noteService.updateNotePermissions(noteIdOrAlias, updateDto),
@@ -194,7 +234,10 @@ export class NotesController {
     @Request() req,
     @Param('noteIdOrAlias') noteIdOrAlias: string,
   ): Promise<RevisionMetadataDto[]> {
-    // ToDo: check if user is allowed to view this notes revisions
+    const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
+    if(!this.permissionsService.mayRead(req.user, note)){
+      throw new UnauthorizedException("Raec denied!");
+    }
     try {
       const revisions = await this.revisionsService.getAllRevisions(
         noteIdOrAlias,
@@ -219,7 +262,10 @@ export class NotesController {
     @Param('noteIdOrAlias') noteIdOrAlias: string,
     @Param('revisionId') revisionId: number,
   ): Promise<RevisionDto> {
-    // ToDo: check if user is allowed to view this notes revision
+    const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
+    if(!this.permissionsService.mayRead(req.user, note)){
+      throw new UnauthorizedException("Read denied!");
+    }
     try {
       return this.revisionsService.toRevisionDto(
         await this.revisionsService.getRevision(noteIdOrAlias, revisionId),
