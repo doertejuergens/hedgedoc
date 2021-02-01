@@ -13,8 +13,8 @@ import {
   NotFoundException,
   Param,
   Put,
-  UseGuards,
   Request,
+  UseGuards,
 } from '@nestjs/common';
 import { HistoryEntryUpdateDto } from '../../../history/history-entry-update.dto';
 import { HistoryEntryDto } from '../../../history/history-entry.dto';

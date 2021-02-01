@@ -16,11 +16,7 @@ import { PermissionsService } from './permissions.service';
     TypeOrmModule.forFeature([NoteUserPermission, NoteGroupPermission]),
     LoggerModule,
   ],
-  exports: [
-    PermissionsService
-  ],
-  providers: [
-    PermissionsService
-  ]
+  exports: [PermissionsService],
+  providers: [PermissionsService],
 })
 export class PermissionsModule {}

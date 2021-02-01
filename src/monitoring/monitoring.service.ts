@@ -16,6 +16,7 @@ let versionCache: null | {
   preRelease?: string;
   commit?: string;
 } = null;
+
 async function getServerVersionFromPackageJson() {
   if (versionCache === null) {
     const rawFileContent: string = await fs.readFile(
