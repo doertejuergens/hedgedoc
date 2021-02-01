@@ -58,19 +58,24 @@ export class NotesController {
       throw new UnauthorizedException('Creation denied!');
     }
     this.logger.debug('Got raw markdown:\n' + text);
-    return this.noteService.createNoteDto(text, '', req.user);
+    return this.noteService.toNoteDto(
+      await this.noteService.createNote(text, '', req.user),
+    );
   }
 
   @UseGuards(TokenAuthGuard)
   @Get(':noteIdOrAlias')
-  async getNote(@Request() req, @Param('noteIdOrAlias') noteIdOrAlias: string) {
+  async getNote(
+    @Request() req,
+    @Param('noteIdOrAlias') noteIdOrAlias: string,
+  ): Promise<NoteDto> {
     const note = await this.noteService.getNoteByIdOrAlias(noteIdOrAlias);
     if (!this.permissionsService.mayRead(req.user, note)) {
       throw new UnauthorizedException('Read denied!');
     }
     // ToDo: check if user is allowed to view this note
     try {
-      return await this.noteService.getNoteDtoByIdOrAlias(noteIdOrAlias);
+      return this.noteService.toNoteDto(note);
     } catch (e) {
       if (e instanceof NotInDBError) {
         throw new NotFoundException(e.message);
@@ -93,25 +98,6 @@ export class NotesController {
     return this.noteService.toNoteDto(
       await this.noteService.createNote(text, noteAlias, req.user),
     );
-  }
-
-  @UseGuards(TokenAuthGuard)
-  @Get(':noteIdOrAlias')
-  async getNote(
-    @Request() req,
-    @Param('noteIdOrAlias') noteIdOrAlias: string,
-  ): Promise<NoteDto> {
-    // ToDo: check if user is allowed to view this note
-    try {
-      return this.noteService.toNoteDto(
-        await this.noteService.getNoteByIdOrAlias(noteIdOrAlias),
-      );
-    } catch (e) {
-      if (e instanceof NotInDBError) {
-        throw new NotFoundException(e.message);
-      }
-      throw e;
-    }
   }
 
   @UseGuards(TokenAuthGuard)

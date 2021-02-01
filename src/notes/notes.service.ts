@@ -155,6 +155,7 @@ export class NotesService {
         ownedNotes: [],
         updatedAt: new Date(),
         userName: 'Testy',
+        groups: [],
       },
       description: 'Very descriptive text.',
       userPermissions: [],
