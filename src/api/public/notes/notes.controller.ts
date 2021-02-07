@@ -5,6 +5,7 @@
  */
 
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -17,7 +18,10 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { NotInDBError } from '../../../errors/errors';
+import {
+  NotInDBError,
+  PermissionsUpdateInconsistent,
+} from '../../../errors/errors';
 import { ConsoleLoggerService } from '../../../logger/console-logger.service';
 import {
   NotePermissionsDto,
@@ -140,7 +144,7 @@ export class NotesController {
   ): Promise<string> {
     // ToDo: check if user is allowed to view this notes content
     try {
-      return await this.noteService.getNoteContent(noteIdOrAlias);
+      return await this.noteService.getNoteContentByIdOrAlias(noteIdOrAlias);
     } catch (e) {
       if (e instanceof NotInDBError) {
         throw new NotFoundException(e.message);
@@ -183,6 +187,9 @@ export class NotesController {
     } catch (e) {
       if (e instanceof NotInDBError) {
         throw new NotFoundException(e.message);
+      }
+      if (e instanceof PermissionsUpdateInconsistent) {
+        throw new BadRequestException(e.message);
       }
       throw e;
     }

@@ -7,7 +7,7 @@
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { NotInDBError } from '../errors/errors';
+import { NotInDBError, PermissionsUpdateInconsistent } from '../errors/errors';
 import { ConsoleLoggerService } from '../logger/console-logger.service';
 import { Revision } from '../revisions/revision.entity';
 import { RevisionsService } from '../revisions/revisions.service';
@@ -22,6 +22,8 @@ import { NoteDto } from './note.dto';
 import { Note } from './note.entity';
 import { Tag } from './tag.entity';
 import { HistoryEntry } from '../history/history-entry.entity';
+import { NoteUserPermission } from '../permissions/note-user-permission.entity';
+import { NoteGroupPermission } from '../permissions/note-group-permission.entity';
 
 @Injectable()
 export class NotesService {
@@ -36,25 +38,21 @@ export class NotesService {
     this.logger.setContext(NotesService.name);
   }
 
-  getUserNotes(user: User): Note[] {
-    this.logger.warn('Using hardcoded data!');
-    return [
-      {
-        id: 'foobar-barfoo',
-        alias: null,
-        shortid: 'abc',
-        owner: user,
-        description: 'Very descriptive text.',
-        userPermissions: [],
-        groupPermissions: [],
-        historyEntries: [],
-        tags: [],
-        revisions: Promise.resolve([]),
-        authorColors: [],
-        title: 'Title!',
-        viewcount: 42,
-      },
-    ];
+  async getUserNotes(user: User): Promise<Note[]> {
+    const notes = await this.noteRepository.find({
+      where: { owner: user },
+      relations: [
+        'owner',
+        'userPermissions',
+        'groupPermissions',
+        'authorColors',
+        'tags',
+      ],
+    });
+    if (notes === undefined) {
+      return [];
+    }
+    return notes;
   }
 
   async createNote(
@@ -77,7 +75,7 @@ export class NotesService {
     return this.noteRepository.save(newNote);
   }
 
-  async getCurrentContent(note: Note): Promise<string> {
+  async getNoteContentByNote(note: Note): Promise<string> {
     return (await this.getLatestRevision(note)).content;
   }
 
@@ -108,6 +106,7 @@ export class NotesService {
         'owner',
         'groupPermissions',
         'userPermissions',
+        'tags',
       ],
     });
     if (note === undefined) {
@@ -140,41 +139,86 @@ export class NotesService {
     return this.noteRepository.save(note);
   }
 
-  updateNotePermissions(
+  async updateNotePermissions(
     noteIdOrAlias: string,
     newPermissions: NotePermissionsUpdateDto,
-  ): Note {
-    this.logger.warn('Using hardcoded data!', 'updateNotePermissions');
-    return {
-      id: 'foobar-barfoo',
-      alias: null,
-      shortid: 'abc',
-      owner: {
-        authTokens: [],
-        createdAt: new Date(),
-        displayName: 'hardcoded',
-        id: '1',
-        identities: [],
-        ownedNotes: [],
-        historyEntries: [],
-        updatedAt: new Date(),
-        userName: 'Testy',
-      },
-      description: 'Very descriptive text.',
-      userPermissions: [],
-      groupPermissions: [],
-      historyEntries: [],
-      tags: [],
-      revisions: Promise.resolve([]),
-      authorColors: [],
-      title: 'Title!',
-      viewcount: 42,
-    };
+  ): Promise<Note> {
+    const note = await this.getNoteByIdOrAlias(noteIdOrAlias);
+
+    const users = newPermissions.sharedToUsers.map(
+      (userPermission) => userPermission.username,
+    );
+    const distinctUser = [...new Set(users)];
+
+    const groups = newPermissions.sharedToGroups.map(
+      (groupPermission) => groupPermission.groupname,
+    );
+    const distinctGroups = [...new Set(groups)];
+
+    if (
+      distinctUser.length !== users.length ||
+      distinctGroups.length !== groups.length
+    ) {
+      throw new PermissionsUpdateInconsistent(
+        'The PermissionUpdate you requested specifies the same user or group multiple times.',
+      );
+    }
+
+    // Update or create userPermissions
+    for (const newUserPermission of newPermissions.sharedToUsers) {
+      const foundPermission = note.userPermissions.find(
+        (userPermission) =>
+          userPermission.user.userName === newUserPermission.username,
+      );
+      if (foundPermission) {
+        foundPermission.canEdit = newUserPermission.canEdit;
+      } else {
+        const user = await this.usersService.getUserByUsername(
+          newUserPermission.username,
+        );
+        const createdPermission = NoteUserPermission.create(
+          user,
+          newUserPermission.canEdit,
+        );
+        note.userPermissions.push(createdPermission);
+      }
+    }
+
+    // Update or create groupPermissions
+    for (const newGroupPermission of newPermissions.sharedToGroups) {
+      const foundPermission = note.groupPermissions.find(
+        (groupPermission) =>
+          groupPermission.group.displayName === newGroupPermission.groupname,
+      );
+      if (foundPermission) {
+        foundPermission.canEdit = newGroupPermission.canEdit;
+      } else {
+        // ToDo: Get group
+        /*const user = await this.usersService.getUserByUsername(
+          newGroupPermission.username,
+        );*/
+        const createdPermission = NoteGroupPermission.create(
+          undefined,
+          newGroupPermission.canEdit,
+        );
+        note.groupPermissions.push(createdPermission);
+      }
+    }
+
+    if (newPermissions.sharedToUsers.length === 0) {
+      note.userPermissions = [];
+    }
+
+    if (newPermissions.sharedToGroups.length === 0) {
+      note.groupPermissions = [];
+    }
+
+    return await this.noteRepository.save(note);
   }
 
-  async getNoteContent(noteIdOrAlias: string): Promise<string> {
+  async getNoteContentByIdOrAlias(noteIdOrAlias: string): Promise<string> {
     const note = await this.getNoteByIdOrAlias(noteIdOrAlias);
-    return this.getCurrentContent(note);
+    return this.getNoteContentByNote(note);
   }
 
   toTagList(note: Note): string[] {
@@ -196,6 +240,12 @@ export class NotesService {
   }
 
   async toNoteMetadataDto(note: Note): Promise<NoteMetadataDto> {
+    // Sort the AuthorShip's by their updatedAt Date to get the latest one
+    // the user of that AuthorShip shall be the updateUser
+    const lastRevision = await this.getLatestRevision(note);
+    const updateUser = lastRevision.authorships.sort(
+      (a, b) => a.updatedAt.getTime() - b.updatedAt.getTime(),
+    )[0].user;
     return {
       // TODO: Convert DB UUID to base64
       id: note.id,
@@ -206,24 +256,17 @@ export class NotesService {
       editedBy: note.authorColors.map(
         (authorColor) => authorColor.user.userName,
       ),
-      // TODO: Extract into method
       permissions: await this.toNotePermissionsDto(note),
       tags: this.toTagList(note),
       updateTime: (await this.getLatestRevision(note)).createdAt,
-      // TODO: Get actual updateUser
-      updateUser: {
-        displayName: 'Hardcoded User',
-        userName: 'hardcoded',
-        email: 'foo@example.com',
-        photo: '',
-      },
-      viewCount: 42,
+      updateUser: this.usersService.toUserDto(updateUser),
+      viewCount: note.viewcount,
     };
   }
 
   async toNoteDto(note: Note): Promise<NoteDto> {
     return {
-      content: await this.getCurrentContent(note),
+      content: await this.getNoteContentByNote(note),
       metadata: await this.toNoteMetadataDto(note),
       editedByAtPosition: [],
     };

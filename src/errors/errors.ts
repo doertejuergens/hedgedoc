@@ -23,3 +23,7 @@ export class TokenNotValidError extends Error {
 export class TooManyTokensError extends Error {
   name = 'TooManyTokensError';
 }
+
+export class PermissionsUpdateInconsistent extends Error {
+  name = 'PermissionsUpdateInconsistent';
+}

@@ -68,7 +68,7 @@ describe('Notes', () => {
       .expect(201);
     expect(response.body.metadata?.id).toBeDefined();
     expect(
-      await notesService.getCurrentContent(
+      await notesService.getNoteContentByNote(
         await notesService.getNoteByIdOrAlias(response.body.metadata.id),
       ),
     ).toEqual(newNote);
@@ -100,7 +100,7 @@ describe('Notes', () => {
       .expect(201);
     expect(response.body.metadata?.id).toBeDefined();
     return expect(
-      await notesService.getCurrentContent(
+      await notesService.getNoteContentByNote(
         await notesService.getNoteByIdOrAlias(response.body.metadata?.id),
       ),
     ).toEqual(newNote);
@@ -126,7 +126,7 @@ describe('Notes', () => {
       .send('New note text')
       .expect(200);
     await expect(
-      await notesService.getCurrentContent(
+      await notesService.getNoteContentByNote(
         await notesService.getNoteByIdOrAlias('test4'),
       ),
     ).toEqual('New note text');
